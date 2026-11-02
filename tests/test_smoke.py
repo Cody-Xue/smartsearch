@@ -315,11 +315,19 @@ async def test_search_zh_current_uses_zhipu_reinforcement(monkeypatch):
             "total": 1,
         }
 
+    async def fetch_news(url):
+        assert url == "https://example.com/news"
+        return "Today's domestic AI announcement: Example Lab published a new model."
+
     monkeypatch.setattr(service.OpenAICompatibleSearchProvider, "search", fake_search)
     monkeypatch.setattr(service, "zhipu_search", fake_zhipu)
+    monkeypatch.setattr(service, "call_tavily_extract", fetch_news)
 
     result = await service.search("今天国内 AI 新闻", validation="balanced")
 
     assert result["ok"] is True
     assert result["routing_decision"]["zh_current_intent"] is True
     assert "zhipu" in result["providers_used"]
+    assert "tavily" in result["providers_used"]
+    assert result["sources"][0]["read"]
+    assert result["freshness_check"]["status"] == "read"

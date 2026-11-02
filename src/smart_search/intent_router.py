@@ -2,6 +2,7 @@ from .i18n import source_message
 import re
 from dataclasses import dataclass, field
 from typing import Any
+from .freshness import freshness_policy
 
 
 ALLOWED_INTENT_ROUTER_MODES = {"jev", "local", "hybrid", "rules", "off"}
@@ -205,6 +206,9 @@ def build_rules_route(
     plan_intent_signals = plan_intent_signals or {}
     urls = extract_urls(query)
     docs_intent = bool(plan_intent_signals.get("docs_api_intent")) or contains_term(query, DOCS_INTENT_KEYWORDS)
+    freshness = freshness_policy(query)
+    if freshness["release_facts"]:
+        docs_intent = False
     zh_current_intent = (
         plan_intent_signals.get("locale_domain_scope") == "china"
         or contains_any(query, ZH_CURRENT_INTENT_KEYWORDS)
@@ -213,6 +217,7 @@ def build_rules_route(
         zh_current_intent
         or plan_intent_signals.get("recency_requirement") in {"recent", "current"}
         or contains_any(query, CURRENT_INTENT_KEYWORDS)
+        or freshness["required"]
     )
     fetch_intent = bool(plan_intent_signals.get("known_url")) or bool(urls) or contains_any(query, FETCH_INTENT_KEYWORDS)
     vertical_intent = contains_term(query, VERTICAL_INTENT_KEYWORDS)
@@ -249,6 +254,7 @@ def build_rules_route(
         "strict_validation": validation_level == "strict",
         "rule_scores": signal_scores,
         "urls": urls,
+        "freshness": freshness,
     }
     for key, value in plan_intent_signals.items():
         intent_signals.setdefault(key, value)

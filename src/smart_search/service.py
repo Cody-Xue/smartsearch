@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 import httpx
 
 from . import jev_search
+from .direct_fetch import fetch_raw_text, is_raw_text_url
 from .config import config
 from . import activity
 from .jev import JevClient, noul
@@ -1113,12 +1114,18 @@ def _evidence_only_synthesis(question: str, evidence_items: list[dict[str, Any]]
         )
     lines = [f"Research result for: {question}", ""]
     lines.append("Evidence-backed findings:")
+    from .freshness import freshness_excerpt, freshness_policy
+    time_sensitive = freshness_policy(question)["required"]
     for index, item in enumerate(evidence_items, 1):
-        content = re.sub(r"\s+", " ", (item.get("content") or "").strip())
-        excerpt = content[:360]
+        body = item.get("content") or ""
+        content = freshness_excerpt(body, question, limit=1800) if time_sensitive else body
+        excerpt = re.sub(r"\s+", " ", content.strip())
+        if not time_sensitive:
+            excerpt = excerpt[:360]
         lines.append(f"{index}. {item.get('title') or item.get('url')} ({item.get('provider')})")
         if excerpt:
-            lines.append(f"   Evidence excerpt: {excerpt}")
+            label = "Evidence excerpt (selected passages; full text in evidence_items)" if time_sensitive else "Evidence excerpt"
+            lines.append(f"   {label}: {excerpt}")
         lines.append(f"   Source: {item.get('url')}")
     if gaps:
         lines.extend(["", "Unverified gaps:"])
@@ -1819,6 +1826,17 @@ async def _run_web_fetch_fallback(
     deadline: float | None = None,
 ) -> tuple[dict[str, Any] | None, list[dict]]:
     attempts: list[dict] = []
+    if is_raw_text_url(url):
+        start = time.time()
+        try:
+            result = await fetch_raw_text(url, deadline=deadline)
+            attempts.append(_attempt("web_fetch", "direct", "ok", start, result_count=1))
+            return result, attempts
+        except Exception as exc:
+            attempts.append(_attempt_from_exception("web_fetch", "direct", start, exc))
+            # Extractors cannot preserve source bytes, so their success would
+            # conceal a fidelity failure rather than provide a valid fallback.
+            return None, attempts
     providers = []
     if _provider_configured("tavily"):
         providers.append("tavily")
@@ -2300,7 +2318,7 @@ async def fetch(url: str, timeout_seconds: float | None = None) -> dict[str, Any
         for provider in ("tavily", "jina", "zhipu-mcp-reader", "firecrawl", "tinyfish", "deepseek")
         if _provider_configured(provider)
     ]
-    if not configured_fetch_providers:
+    if not configured_fetch_providers and not attempts:
         error = "No enabled web_fetch provider is configured"
         if config.tavily_api_key and not config.tavily_enabled:
             error = f"{error}; {_tavily_disabled_message()}"
@@ -2325,7 +2343,7 @@ async def fetch(url: str, timeout_seconds: float | None = None) -> dict[str, Any
     return {
         "ok": False,
         "url": url,
-        "provider": "",
+        "provider": "direct" if is_raw_text_url(url) else "",
         "content": "",
         "error_type": error_type,
         "error": error,

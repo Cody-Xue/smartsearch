@@ -2,7 +2,7 @@
 
 `search` 和 `research` 是两种联网搜索模式，共用渠道目录、执行器、总时限和证据记录。
 
-- `search`：一次 Jev 选路，选择一个适合的渠道，返回结果与来源。Context7 查库后读文档等必要依赖调用，以及同能力故障兜底继续保留。不会执行充分性评估、自动补搜、过滤或汇总。`--extra-sources N` 只限制所选渠道的结果数量（最多 20），不增加渠道。`evidence_assessment.status=not_evaluated` 表示尚未评估，检索成功不等于事实核验成功。`--validation strict` 要求来源证据，不满足时可保留部分内容并返回证据错误。模型回答先做本地检查（`NO_WEB_SEARCH`、无来源、仅开场白），配置了 Jev 时再判断是否实质回答、是否与自身引用矛盾；被拒则走同能力兜底。
+- `search`：一次 Jev 选路，选择一个发现渠道，返回结果与来源。Context7 查库后读文档等必要依赖调用，以及同能力故障兜底继续保留。最新、当前或截至某日的问题还会限量读页，并在 Jev 可用时评估已读证据；其他问题仍为 `evidence_assessment.status=not_evaluated`。不会追加发现搜索、过滤或汇总。`--extra-sources N` 只限制所选渠道的发现结果数量（最多 20），不控制时效性读页数量。检索成功不等于事实核验成功。`--validation strict` 要求来源证据，不满足时可保留部分内容并返回证据错误。模型回答先做本地检查（`NO_WEB_SEARCH`、无来源、仅开场白），配置了 Jev 时再判断是否实质回答、是否与自身引用矛盾；被拒则走同能力兜底。
 - `research`：Jev 选择互补动作并发执行，读取发现的网页，判断证据缺口，必要时继续。原问题、子问题和有限缺口查询由程序提供，Jev 只选择候选，不生成任意查询或工具调用。只有实际 fetched/read 的内容进入 `citations`。可选过滤和 `SMART_SEARCH_JEV_SYNTHESIZE=false|auto|true` 只影响深入搜索。
 - `deep` 继续离线生成计划，`steps[].command` 是供人或 AI 手动编排的建议。`research` 实际执行记录单独保存在 `routing_decision.rounds` 和 `stage_results` 中。
 
@@ -13,6 +13,16 @@
 只有已配置、启用、允许且不在冷却期的渠道可以执行。`--providers`、各 provider 开关、`SMART_SEARCH_RESEARCH_DISABLED_PROVIDERS` 和 explicit-only 限制在选路与派发前检查。普通渠道失败可在同能力内兜底，不能扩展成深研循环；用户偏好也不能绕过这些边界。
 
 总时限默认 300 秒（`SMART_SEARCH_TIMEOUT_SECONDS`，`search --timeout` 可覆盖）。深研 quick/standard/deep 的上限分别是 2/3/10 轮、每轮 1/2/10 渠道、每渠道 3/5/20 个结果，以及 45/120/配置秒数，并受用户 Jev 预算进一步限制。证据充分、候选耗尽、无新证据或期限到达时停止；可选判断、过滤、汇总失败仍保留已完成的结果。
+
+## 时效性读页与源码保真
+
+最新、当前或截至某日的问题在 `search` 和 `research` 中都会增加有界的读页阶段。版本/发行事实最多尝试 3 页，其他时效性事实最多 2 页。首次进入时，以 45 秒和当时剩余总预算一半的较小值确定截止时间；后续研究轮次共用这一截止时间，不重新计时。读页及额外 Jev 判断会增加耗时与 API 用量，仍受 provider 过滤、禁用、冷却和总时限约束。
+
+候选只能来自搜索结果 URL，或已读正文里实际存在的发行/下载链接；不会猜测官网域名或拼造发布页。Jev 根据原问题、截至日期和链接附近上下文选择下一页。用户指定域名是偏好，不等于该网页已被证明权威。Context7 不参与版本/发行事实及无关的当前网页事实，API 用法问题仍可走文档检索。
+
+时效性评估只看 fetched/read 证据，不把搜索摘要或模型回答当作正文。`freshness_check` 记录策略、尝试页面和读取状态；`status=read` 只说明读到了页面。是否足够应看 `evidence_assessment.sufficient`、`gaps` 和 `source_warning`。读页失败、判断不可用或事实仍有缺口时保留已有材料并明确标为未核验；有界读页不保证每次都找到最新事实。
+
+识别为公开原始文本/源码的 URL 由 direct transport 直接读取，包括 Jev 选择的抓取操作。JSON 的 `content` 保留解码后的字符、空白和换行，未经 Markdown 转换；`encoding`、`byte_count`、`sha256`、`final_url`、`truncated=false` 描述完整响应。用返回的编码重新编码 `content` 可核对哈希；哈希针对 HTTP 内容编码解压后的正文，而非压缩传输字节。保存原文件使用 `fetch URL --format content --output PATH`，按返回编码写字节、不追加换行；Markdown 只供展示。直接读取上限为 2 MiB、30 秒，且受调用方剩余时限约束；逐跳校验公网地址与重定向，不携带服务商凭据。文件过大、部分响应、无法无损解码、二进制或意外 HTML 会明确失败，不改走有损抽取。普通 HTML 仍使用原有抓取链。
 
 ## 配置
 
@@ -59,7 +69,7 @@ smart-search config set SMART_SEARCH_JEV_SYNTHESIZE auto
 | `SMART_SEARCH_JEV_SYNTHESIS_MODEL` | 空 | 独立汇总模型名 |
 | `SMART_SEARCH_JEV_SYNTHESIS_API_MODE` | `chat-completions` | `chat-completions` 或 `responses` |
 
-阈值是初始策略，并不保证判断正确，需要用实际问题校准。深入搜索过滤关闭时仍然判断是否需要继续；普通搜索不做这些判断。
+阈值是初始策略，并不保证判断正确，需要用实际问题校准。深入搜索过滤关闭时仍然判断是否需要继续；普通搜索只对时效性问题做读页选择与证据评估，不进入发现搜索循环。
 
 ## 深入搜索执行行为
 
@@ -95,7 +105,8 @@ smart-search config set SMART_SEARCH_JEV_SYNTHESIZE auto
 `content` 只携带一次最终内容；`sources` 和路由记录仅含元数据，不重新附上被删文本。输出包括：
 
 - `routing_decision.rounds`：各轮选中的渠道、概率、结果判断和停止原因。
-- `evidence_assessment`：足够、部分、无用或判断未知。普通搜索为 not_evaluated；深入搜索 balanced 可返回部分成功，strict 必须达到证据足够。
+- `evidence_assessment`：足够、部分、无用或判断未知。一般普通搜索为 not_evaluated，时效性搜索评估已读证据；深入搜索 balanced 可返回部分成功，strict 必须达到证据足够。
+- `freshness_check` / `source_warning`：时效性策略、尝试页面与读取状态，以及未解决事实的提示。读到正文不代表它足够新或已经回答问题。
 - `result_filter`：过滤状态、前后字符数、删除片段 ID、失败保留原因。
 - `synthesis`：配置的 `mode`、是否决定汇总的 `enabled`、执行状态，以及 auto 模式的判断来源、概率、阈值或跳过原因。此判断消耗计入 `jev_usage`，阶段记为 `synthesis_decision`。
 - `jev_usage` / `jev_calls`：API 返回的真实 token 用量、请求数和耗时；没有用字符数冒充 token。

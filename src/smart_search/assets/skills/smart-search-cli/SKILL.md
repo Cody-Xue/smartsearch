@@ -33,14 +33,14 @@ Use the local `smart-search` command as the default execution layer for web rese
 
 ## Routing
 
-- `search`: single-pass retrieval: Jev or local rules select one suitable channel, which returns results and sources; no automatic assessment, follow-up, filtering, or synthesis.
+- `search`: Jev or local rules select one discovery channel. Latest/current/as-of questions also read a bounded set of discovered pages and assess read evidence when Jev is available; inspect `freshness_check`, `evidence_assessment` and `source_warning`. Other questions remain unassessed. No follow-up discovery search, filtering or synthesis.
 - `route`: explain capability routing locally without executing providers; `--router-mode jev --remote` explicitly opts into a potentially billable TypeSafe judgment.
 - `research`: shared bounded loop with Jev or local routing for complementary discovery, fetch/read, evidence gaps, and optional synthesis.
 - `deep`: offline Deep Research planner; it does not run providers, fetch pages, or replace default `search`.
 - `zhipu-search`: Chinese-language, domestic China, policy/regulatory, announcements, current news, or China-local source discovery.
 - `context7-library` / `context7-docs`: library, SDK, API, framework, or documentation intent. Ordinary search uses the first library in Context7's ranked candidates; research may ask Jev to choose a candidate, using the first candidate if Jev fails or no score reaches its threshold. Unresolved libraries allow same-capability fallback. Explicit commands retain the candidate list and supplied library id.
 - `exa-search`: official domains, papers, product pages, trusted pages, date/domain-filtered low-noise discovery, and adjacent source discovery through `exa-similar`.
-- `fetch`: user-provided URLs or any claim that depends on page content.
+- `fetch`: user-provided URLs or any claim that depends on page content. Recognized public raw-text/code URLs use lossless direct reading; inspect JSON `content`, `encoding`, `sha256`, `byte_count` and `truncated`. A raw fetch failure never falls back to Markdown extraction.
 - `map`: documentation site or domain structure before fetching many pages from one site.
 - `anysearch-*`: explicit experimental vertical search only. Inspect domains first and do not use AnySearch as default fallback. Parse JSON parameters before repeatable `--param key=value` overrides; `anysearch-extract --max-length` sends only the URL upstream and truncates successful text locally.
 - `sciverse-*`: explicit experimental academic search only. Use for catalog/search/semantic/read/relations; do not use Sciverse as `docs_search`, `standard`, or default `search` / `research` fallback.
