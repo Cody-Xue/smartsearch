@@ -1569,9 +1569,14 @@ async def test_zhipu_mcp_web_search_error_records_attempt_and_falls_back_same_ca
     async def yes_tavily(query, max_results=6):
         return [{"url": "https://fallback.example.com", "title": "Fallback", "content": "fallback source"}]
 
+    async def fetch_fallback(url):
+        assert url.rstrip("/") == "https://fallback.example.com"
+        return "MCP status announcement: service is operational, updated today."
+
     monkeypatch.setattr(service.OpenAICompatibleSearchProvider, "search", fake_search)
     monkeypatch.setattr(service, "zhipu_mcp_search", failing_zhipu_mcp)
     monkeypatch.setattr(service, "call_tavily_search", yes_tavily)
+    monkeypatch.setattr(service, "call_tavily_extract", fetch_fallback)
 
     result = await service.search("latest MCP status", validation="strict")
 
@@ -1582,6 +1587,8 @@ async def test_zhipu_mcp_web_search_error_records_attempt_and_falls_back_same_ca
     assert web_attempts[0]["error_type"] == "provider_error"
     assert web_attempts[1]["status"] == "ok"
     assert result["sources"][0]["provider"] == "tavily"
+    assert result["sources"][0]["read"]
+    assert result["freshness_check"]["status"] == "read"
 
 
 @pytest.mark.asyncio
@@ -1620,8 +1627,13 @@ async def test_balanced_current_sports_queries_use_web_search_reinforcement(monk
     async def fake_tavily_search(query, max_results=6):
         return [{"url": "https://sports.example.com", "title": "Sports", "content": "score"}]
 
+    async def fetch_sports(url):
+        assert url.rstrip("/") == "https://sports.example.com"
+        return "Today's schedule: Example A vs Example B, 19:30."
+
     monkeypatch.setattr(service.OpenAICompatibleSearchProvider, "search", fake_search)
     monkeypatch.setattr(service, "call_tavily_search", fake_tavily_search)
+    monkeypatch.setattr(service, "call_tavily_extract", fetch_sports)
 
     result = await service.search(query, validation="balanced")
 
@@ -1630,7 +1642,10 @@ async def test_balanced_current_sports_queries_use_web_search_reinforcement(monk
     assert result["routing_decision"]["web_current_intent"] is True
     assert result["routing_decision"]["supplemental_paths"] == []
     assert any(attempt["capability"] == "web_search" and attempt["status"] == "ok" for attempt in result["provider_attempts"])
-    assert result["sources"][0]["url"] == "https://sports.example.com"
+    assert result["sources"][0]["url"].rstrip("/") == "https://sports.example.com"
+    if query == "今日赛程":
+        assert result["sources"][0]["read"]
+        assert "Example A vs Example B" in result["content"]
 
 
 @pytest.mark.asyncio
@@ -3337,14 +3352,21 @@ async def test_failing_zhipu_is_skipped_on_the_next_run_instead_of_retried(monke
         calls["tavily"] += 1
         return [{"title": "T", "url": "https://example.com/a", "content": "body"}]
 
+    async def fetch_news(url):
+        assert url == "https://example.com/a"
+        return "Current announcement: example service has resumed today."
+
     monkeypatch.setattr(service, "zhipu_search", failing_zhipu)
     monkeypatch.setattr(service, "call_tavily_search", working_tavily)
+    monkeypatch.setattr(service, "call_tavily_extract", fetch_news)
 
     first_attempts = (await service.search("latest news"))["provider_attempts"]
     second_attempts = (await service.search("latest news"))["provider_attempts"]
 
-    assert [(item["provider"], item["status"]) for item in first_attempts] == [("zhipu", "error"), ("tavily", "ok")]
-    assert [(item["provider"], item["status"]) for item in second_attempts] == [("zhipu", "skipped"), ("tavily", "ok")]
+    assert [(item["provider"], item["status"]) for item in first_attempts if item["capability"] == "web_search"] == [("zhipu", "error"), ("tavily", "ok")]
+    assert [(item["provider"], item["status"]) for item in second_attempts if item["capability"] == "web_search"] == [("zhipu", "skipped"), ("tavily", "ok")]
+    assert [(item["provider"], item["status"]) for item in first_attempts if item["operation"] == "fetch"] == [("tavily", "ok")]
+    assert [(item["provider"], item["status"]) for item in second_attempts if item.get("operation") == "fetch"] == [("tavily", "ok")]
     # The dead channel is called once, not once per invocation.
     assert calls == {"zhipu": 1, "tavily": 2}
     assert second_attempts[0]["error_type"] == "auth_error"
@@ -3465,17 +3487,24 @@ async def test_search_reports_one_notice_per_degraded_provider(monkeypatch):
     async def tavily(*args, **kwargs):
         return [{"url": "https://example.com", "content": "Fallback source"}]
 
+    async def fetch_news(url):
+        assert url.rstrip("/") == "https://example.com"
+        return "Latest published announcement: example service resumed today."
+
     async def dead_zhipu(query, count=10, **kwargs):
         return {"ok": False, "error_type": "auth_error", "error": "HTTP 401: invalid api key"}
 
     monkeypatch.setattr(service.OpenAICompatibleSearchProvider, "search", fake_primary_search)
     monkeypatch.setattr(service, "zhipu_search", dead_zhipu)
     monkeypatch.setattr(service, "call_tavily_search", tavily)
+    monkeypatch.setattr(service, "call_tavily_extract", fetch_news)
 
     first = await service.search("最新消息", validation="balanced")
     second = await service.search("最新消息", validation="balanced")
 
     assert first["ok"] is True
+    assert first["freshness_check"]["status"] == "read"
+    assert second["freshness_check"]["status"] == "read"
     assert [notice["provider"] for notice in first["provider_notices"]] == ["zhipu"]
     assert first["provider_notices"][0]["status"] == "cooldown"
     assert second["provider_notices"][0]["error_type"] == "auth_error"

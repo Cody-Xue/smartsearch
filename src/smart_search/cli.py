@@ -1172,6 +1172,8 @@ def _plain_result_lines(data: dict[str, Any]) -> list[str]:
 
 
 def _format_content(command: str, data: dict[str, Any]) -> str:
+    if command == "fetch" and data.get("ok") and data.get("content_format") == "raw_text":
+        return str(data.get("content") or "")
     if command in {"search", "fetch", "context7-docs", "research"}:
         content = data.get("content")
         if content:
@@ -1418,6 +1420,24 @@ def _exit_code(data: dict[str, Any]) -> int:
 
 def _print_result(command: str, data: dict[str, Any], fmt: str, output: str = "") -> int:
     activity.result(data)
+    if command == "fetch" and fmt == "content" and data.get("ok") and data.get("content_format") == "raw_text":
+        content = str(data.get("content") or "")
+        raw = content.encode(str(data.get("encoding") or "utf-8"), errors="strict")
+        if output:
+            target = Path(output)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(raw)
+        # Write original bytes to pipes/files without Windows newline conversion
+        # or the display renderer's backslash escaping. A text-only host/capture
+        # still receives the unchanged string, without an added trailing newline.
+        buffer = getattr(sys.stdout, "buffer", None)
+        if buffer is not None and not sys.stdout.isatty():
+            sys.stdout.flush()
+            buffer.write(raw)
+            buffer.flush()
+        else:
+            sys.stdout.write(content)
+        return _exit_code(data)
     rendered = _render(command, data, fmt)
     if output:
         service.write_output(output, rendered)

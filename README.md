@@ -151,11 +151,14 @@ flowchart LR
     R --> E{"Enough evidence?<br/>threshold 0.75"}
     E -- "gaps remain" --> R
     E -- "enough" --> A["Result cites only pages actually read"]
-    S --> A2["Results and sources"]
+    S --> T{"Current/as-of facts?"}
+    T -- "yes" --> V["Bounded page reads;<br/>Jev assesses read evidence when available"]
+    T -- "no" --> A2["Results and sources"]
+    V --> A2
 ```
 
 - **The program lists the candidates; Jev only chooses.** Each candidate carries its provider, operation, capability, the actual query or URL, and your preference order, never a channel key. Jev does not write free-form queries or make tool calls.
-- **search routes once.** It picks one suitable channel and returns results and sources, without sufficiency assessment, follow-up searches, filtering or synthesis; its `evidence_assessment.status` is `not_evaluated`. A successful retrieval is not a verified fact.
+- **search selects one discovery channel.** Ordinary questions return results and sources with `evidence_assessment.status=not_evaluated`. Latest/current/as-of questions also read a bounded set of discovered pages and, when Jev is available, assess the read evidence. There is no follow-up discovery search, filtering or synthesis. Inspect `freshness_check`, `evidence_assessment` and `source_warning`; retrieval success alone does not verify freshness.
 - **research follows the evidence gaps.** Each round Jev picks complementary actions that run concurrently, discovered pages are read, and the evidence is judged for a direct answer, detail, freshness, authority and corroboration. Only fetched or read text enters the citations.
 - **It still works without Jev.** Without a TypeSafe key, or without a valid judgment, the default `--fallback auto` routes by local capability rules and marks the result as degraded; `--fallback off` fails instead. Explicit `local` mode never calls Jev.
 - **Budgets are bounded.** Live research at quick / standard / deep allows at most 2 / 3 / 10 rounds and 1 / 2 / 10 channels per round, further limited by your Jev settings (3 rounds and 3 channels by default), and stops early once the evidence is enough.
@@ -174,6 +177,8 @@ One provider per capability is enough. Enter keys on the App's **Providers** pag
 | Page fetching | Jina, Firecrawl, Zhipu page reading, Tavily, TinyFish, DeepSeek | Reads a known URL as clean text |
 | Vertical retrieval (experimental) | AnySearch, SciVerse | Domain and academic retrieval; SciVerse runs only when named explicitly |
 | Intent routing (optional) | Jev (TypeSafe) | Scores candidate channels and routes |
+
+`fetch` recognizes public raw-text and source-code URLs and reads them directly, preserving the decoded `content` without Markdown conversion. JSON includes `encoding`, `byte_count`, `sha256` and `truncated`; the hash covers the complete HTTP entity body after content decoding. Save original bytes with `--format content --output PATH`; Markdown is for display. Files over 2 MiB, invalid encodings or unexpected HTML fail explicitly instead of falling back to lossy page extraction. Normal HTML pages retain the configured extraction chain.
 
 ## Supported AI tools
 
@@ -248,7 +253,7 @@ Separately. The App checks at each launch and asks in a dialog when a new versio
 ## Known limits
 
 - A search hit is a lead. Read the source before relying on an important claim.
-- Ordinary search does not assess evidence; use live research, or have your AI read the original page, when a claim needs checking.
+- Latest/current/as-of searches read discovered pages and assess freshness when Jev is available; other ordinary searches remain unassessed. Use live research or read the original page for broader fact checking, and inspect unresolved evidence gaps.
 - Jev's thresholds (0.5 for routing, 0.75 for sufficient evidence) are a starting policy and need calibrating against real questions.
 - Availability, quota and result quality depend on each provider.
 - Existing Inno installations need a one-time full migration. Final GUI and old-install migration acceptance is recorded separately from automated build and upgrade checks.

@@ -294,13 +294,15 @@ async def test_partial_results_trigger_new_channels_with_failure_and_gap_context
 
     monkeypatch.setattr(service, "exa_search", exa)
     monkeypatch.setattr(service, "zhipu_search", zhipu)
-    result = await run_loop("Current announcement")
+    # Loop mechanics here intentionally use non-temporal input; current facts
+    # now require fetched pages (covered separately in test_freshness.py).
+    result = await run_loop("Announcement details")
 
     assert result["ok"]
     assert len(result["routing_decision"]["rounds"]) == 2
     second_selection = calls[2][0]
     assert "zhipu:search" in [item["id"] for item in second_selection["available_channels"]]
-    assert any(item["provider"] == "exa" and item["query"] != "Current announcement" for item in second_selection["available_channels"])
+    assert any(item["provider"] == "exa" and item["query"] != "Announcement details" for item in second_selection["available_channels"])
     assert second_selection["search_history"][0]["assessment"]["gaps"] == ["freshness"]
     assert second_selection["evidence"][0]["content"] == "Old but relevant evidence"
     assert "Old but relevant evidence" in result["content"]

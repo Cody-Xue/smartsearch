@@ -473,6 +473,13 @@ async def filter_evidence(client: JevClient, query: str, evidence: list[dict]) -
             item_units = units_by_result[item["id"]]
             selected = [unit for unit in item_units if unit["chunk_id"] in kept]
             if selected:
+                if item.get("content_format") == "raw_text":
+                    # Source code is an atomic artifact. Pruning even one chunk
+                    # would invalidate its full-body checksum and exact text.
+                    filtered.append(item)
+                    raw_ids = {unit["chunk_id"] for unit in item_units}
+                    info["dropped_chunk_ids"] = [key for key in info["dropped_chunk_ids"] if key not in raw_ids]
+                    continue
                 # Preserve the exact original when all chunks survived.
                 content = item["content"] if len(selected) == len(item_units) else "\n\n[…]\n\n".join(unit["content"] for unit in selected)
                 filtered.append({**item, "content": content})
